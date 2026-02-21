@@ -48,6 +48,7 @@ import { Logger, LOG_ACTIONS_LOAD_CHART } from 'src/logger/LogUtils';
 import { allowCrossDomain as domainShardingEnabled } from 'src/utils/hostNamesConfig';
 import { updateDataMask } from 'src/dataMask/actions';
 import { waitForAsyncData } from 'src/middleware/asyncEvent';
+import { nanoid } from 'nanoid';
 import { ensureAppRoot } from 'src/utils/pathUtils';
 import { safeStringify } from 'src/utils/safeStringify';
 import { extendedDayjs } from '@superset-ui/core/utils/dates';
@@ -118,6 +119,7 @@ export interface ChartUpdateStartedAction {
   queryController: AbortController;
   latestQueryFormData: QueryFormData | LatestQueryFormData;
   key: string | number;
+  clientId?: string;
 }
 
 export interface ChartUpdateSucceededAction {
@@ -275,6 +277,7 @@ export interface GetChartDataRequestParams {
   method?: 'GET' | 'POST';
   requestParams?: RequestParams;
   ownState?: JsonObject;
+  clientId?: string;
 }
 
 // runAnnotationQuery params interface
@@ -309,12 +312,14 @@ export function chartUpdateStarted(
   queryController: AbortController,
   latestQueryFormData: QueryFormData | LatestQueryFormData,
   key: string | number,
+  clientId?: string,
 ): ChartUpdateStartedAction {
   return {
     type: CHART_UPDATE_STARTED,
     queryController,
     latestQueryFormData,
     key,
+    clientId,
   };
 }
 
@@ -455,6 +460,7 @@ const v1ChartDataRequest = async (
   setDataMask: (dataMask: DataMask) => void,
   ownState: JsonObject,
   parseMethod?: string,
+  clientId?: string,
 ): Promise<ChartDataRequestResponse> => {
   const payload = await buildV1ChartDataPayload({
     formData: formData as QueryFormData,
@@ -464,6 +470,10 @@ const v1ChartDataRequest = async (
     setDataMask,
     ownState,
   });
+
+  if (clientId) {
+    payload.client_id = clientId;
+  }
 
   // The dashboard id is added to query params for tracking purposes
   const { slice_id: sliceId } = formData;
@@ -506,6 +516,7 @@ export async function getChartDataRequest({
   method = 'POST' as const,
   requestParams = {},
   ownState = {},
+  clientId,
 }: GetChartDataRequestParams): Promise<ChartDataRequestResponse> {
   let querySettings: RequestParams = {
     ...requestParams,
@@ -539,6 +550,7 @@ export async function getChartDataRequest({
     setDataMask,
     ownState,
     parseMethod,
+    clientId,
   );
 }
 
@@ -743,6 +755,8 @@ export function exploreJSON(
     const queryTimeout =
       timeout || state.common.conf.SUPERSET_WEBSERVER_TIMEOUT || 0;
 
+    const clientId = nanoid(11);
+
     const requestParams: RequestParams = {
       signal: controller.signal,
       timeout: queryTimeout * 1000,
@@ -752,7 +766,14 @@ export function exploreJSON(
     const setDataMask = (dataMask: DataMask): void => {
       dispatch(updateDataMask(formData.slice_id, dataMask));
     };
-    dispatch(chartUpdateStarted(controller, formData, key as string | number));
+    dispatch(
+      chartUpdateStarted(
+        controller,
+        formData,
+        key as string | number,
+        clientId,
+      ),
+    );
     /**
      * Abort in-flight requests after the new controller has been stored in
      * state. Delaying ensures we do not mutate the Redux state between
@@ -771,6 +792,7 @@ export function exploreJSON(
       method: 'POST',
       requestParams,
       ownState,
+      clientId,
     });
 
     const [useLegacyApi] = getQuerySettings(formData);
